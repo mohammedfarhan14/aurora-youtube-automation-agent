@@ -1666,3 +1666,108 @@ html:not([data-theme="dark"]) .analytics-insight {
   background: #fff;
   border-color: #d9dee5;
 }
+html:not([data-theme="dark"]) .analytics-no-data {
+  color: #5d6673;
+  background: #f5f6f8;
+  font-style: italic;
+}
+html:not([data-theme="dark"]) .analytics-no-data-pending {
+  color: #765516;
+  background: #fff7e4;
+}
+
+/* Rights review is used on several workspace pages. Keep its legacy dark
+   form colors from leaking into the light theme. */
+html:not([data-theme="dark"]) .rights-review-panel {
+  color: #25282d;
+  background: #f8f9fa;
+  border-color: #dfe2e6;
+}
+html:not([data-theme="dark"]) .rights-review-panel .research-detail-heading h3,
+html:not([data-theme="dark"]) .rights-history .research-detail-heading h4,
+html:not([data-theme="dark"]) .rights-form-heading strong {
+  color: #25282d;
+}
+html:not([data-theme="dark"]) .rights-review-panel .research-detail-heading p,
+html:not([data-theme="dark"]) .rights-form-heading .muted,
+html:not([data-theme="dark"]) .rights-source-reference small,
+html:not([data-theme="dark"]) .rights-metadata-grid small,
+html:not([data-theme="dark"]) .rights-history-item > small {
+  color: #59616b;
+}
+html:not([data-theme="dark"]) .rights-metadata-grid > div,
+html:not([data-theme="dark"]) .rights-source-reference,
+html:not([data-theme="dark"]) .rights-history-item {
+  color: #292d33;
+  background: #fff;
+  border-color: #dfe2e6;
+}
+html:not([data-theme="dark"]) .rights-metadata-grid strong,
+html:not([data-theme="dark"]) .rights-history-item .research-detail-heading strong,
+html:not([data-theme="dark"]) .rights-history-item > p {
+  color: #30343a;
+}
+html:not([data-theme="dark"]) .rights-source-reference a,
+html:not([data-theme="dark"]) .rights-history-links a { color: #a52b31; }
+html:not([data-theme="dark"]) .rights-review-form label,
+html:not([data-theme="dark"]) .rights-restriction-grid .checkbox-row { color: #373b42; }
+html:not([data-theme="dark"]) .rights-review-form input:not([type="checkbox"]),
+html:not([data-theme="dark"]) .rights-review-form select,
+html:not([data-theme="dark"]) .rights-review-form textarea {
+  color: #25272b;
+  background: #fff;
+  border-color: #cfd3d9;
+}
+html:not([data-theme="dark"]) .rights-restrictions { border-color: #d5d9df; }
+html:not([data-theme="dark"]) .rights-restrictions legend { color: #353941; }
+html:not([data-theme="dark"]) .rights-review-warning {
+  color: #704c10;
+  background: #fff7e4;
+  border-left-color: #c59130;
+}
+html:not([data-theme="dark"]) .rights-status { color: #765516; background: #fff2d3; }
+html:not([data-theme="dark"]) .rights-status-cleared { color: #236848; background: #eaf6ee; }
+html:not([data-theme="dark"]) .rights-status-restricted { color: #a73237; background: #fff0f0; }
+
+html[data-theme="dark"] .analytics-no-data { color: #c4c9d1; background: #242629; }
+html[data-theme="dark"] .analytics-no-data-pending { color: #f3d8a8; background: #332919; }
+html[data-theme="dark"] .rights-review-panel {
+  color: #e8e9ec;
+  background: #202225;
+  border-color: #414449;
+}
+html[data-theme="dark"] .rights-review-panel .research-detail-heading h3,
+html[data-theme="dark"] .rights-history .research-detail-heading h4,
+html[data-theme="dark"] .rights-form-heading strong { color: #f1f1f2; }
+html[data-theme="dark"] .rights-review-panel .research-detail-heading p,
+html[data-theme="dark"] .rights-form-heading .muted,
+html[data-theme="dark"] .rights-source-reference small,
+html[data-theme="dark"] .rights-metadata-grid small,
+html[data-theme="dark"] .rights-history-item > small { color: #b2b5bb; }
+html[data-theme="dark"] .rights-metadata-grid > div,
+html[data-theme="dark"] .rights-source-reference,
+html[data-theme="dark"] .rights-history-item {
+  color: #e5e6e9;
+  background: #292c30;
+  border-color: #44474c;
+}
+html[data-theme="dark"] .rights-metadata-grid strong,
+html[data-theme="dark"] .rights-history-item .research-detail-heading strong,
+html[data-theme="dark"] .rights-history-item > p { color: #d5d7db; }
+html[data-theme="dark"] .rights-source-reference a,
+html[data-theme="dark"] .rights-history-links a { color: #f3c0c3; }
+html[data-theme="dark"] .rights-review-form label,
+html[data-theme="dark"] .rights-restriction-grid .checkbox-row { color: #d5d7db; }
+html[data-theme="dark"] .rights-review-form input:not([type="checkbox"]),
+html[data-theme="dark"] .rights-review-form select,
+html[data-theme="dark"] .rights-review-form textarea {
+  color: #f1f2f4;
+  background: #17191b;
+  border-color: #4a4d52;
+}
+html[data-theme="dark"] .rights-restrictions { border-color: #44474c; }
+html[data-theme="dark"] .rights-restrictions legend { color: #e8e9ec; }
+html[data-theme="dark"] .rights-review-warning { color: #f3d8a8; background: #332919; }
+html[data-theme="dark"] .rights-status { color: #f1ce81; background: #3b3220; }
+html[data-theme="dark"] .rights-status-cleared { color: #9ce0ba; background: #1f392b; }
+html[data-theme="dark"] .rights-status-restricted { color: #ffb5bc; background: #3b222b; }

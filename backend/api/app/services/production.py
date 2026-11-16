@@ -435,6 +435,8 @@ async def record_production_stage_failure(
     failure_code: str,
     failure_message: str,
     session_factory: async_sessionmaker[AsyncSession],
+    run_failure_code: str = "story_stage_retry_exhausted",
+    failure_domain: str = "story",
 ) -> bool:
     """Release a known failed attempt immediately and retry it with bounded backoff."""
     if max_attempts < 1:
@@ -491,8 +493,8 @@ async def record_production_stage_failure(
                 stage.status = "failed"
                 stage.completed_at = now
                 run.status = "failed"
-                run.failure_code = "story_stage_retry_exhausted"
-                run.failure_message = "A story production stage exhausted its retry budget."
+                run.failure_code = run_failure_code
+                run.failure_message = "A production stage exhausted its retry budget."
                 run.completed_at = now
                 run.lease_token = None
                 run.lease_expires_at = None
@@ -510,9 +512,9 @@ async def record_production_stage_failure(
         await enqueue_operations_alert(
             session_factory,
             organization_id=organization_id,
-            subject="Aurora Studio: story production run failed",
+            subject=f"Aurora Studio: {failure_domain} production run failed",
             body=(
-                "A story production stage exhausted its retry budget.\n\n"
+                f"A {failure_domain} production stage exhausted its retry budget.\n\n"
                 f"Production run ID: {run_id}\n"
                 f"Failed stage: {stage_key}\n"
                 f"Failure code: {failure_code}\n\n"

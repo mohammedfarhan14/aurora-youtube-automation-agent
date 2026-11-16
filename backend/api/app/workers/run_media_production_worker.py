@@ -215,6 +215,7 @@ async def run_media_production_worker(
                     storage=storage,
                     session_factory=session_factory,
                     lease_seconds=settings.media_worker_lease_seconds,
+                    max_attempts=settings.media_worker_max_attempts,
                 )
                 if processed:
                     continue
@@ -225,7 +226,8 @@ async def run_media_production_worker(
                 raise
             except Exception:
                 logger.exception(
-                    "Media worker iteration failed; the durable lease will govern retry."
+                    "Media worker iteration failed; claimed-stage errors are persisted "
+                    "with bounded backoff, and lease recovery handles interruptions."
                 )
                 if drain:
                     raise

@@ -35,6 +35,7 @@ from app.services.media_artifacts import (
 from app.services.production import (
     claim_production_stage,
     complete_production_stage,
+    record_production_stage_failure,
     renew_production_stage_lease,
 )
 from app.services.story_artifacts import load_latest_story_artifact
@@ -1509,6 +1510,7 @@ async def run_media_stage_once(
     background_music_provider: BackgroundMusicProvider | None = None,
     alignment_provider: WhisperXAlignmentProvider | None = None,
     lease_seconds: int = 300,
+    max_attempts: int = 5,
 ) -> bool:
     """Claim and execute at most one media stage using durable PostgreSQL leases."""
 
@@ -1543,6 +1545,7 @@ async def run_media_stage_once(
             session_factory=session_factory,
         )
     )
+    stage_error: Exception | None = None
     try:
         common = {
             "organization_id": organization_id,
@@ -1592,9 +1595,29 @@ async def run_media_stage_once(
             )
         else:
             raise RuntimeError(f"Unsupported media worker stage: {stage_key}")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        stage_error = exc
     finally:
         stop_heartbeat.set()
         await heartbeat
+
+    if stage_error is not None:
+        await record_production_stage_failure(
+            stage_id,
+            lease_token,
+            max_attempts=max_attempts,
+            failure_code="media_stage_execution_failed",
+            failure_message=(
+                "Media production stage failed. Aurora will retry with bounded backoff; "
+                "check provider health if the failure repeats."
+            ),
+            session_factory=session_factory,
+            run_failure_code="media_stage_retry_exhausted",
+            failure_domain="media",
+        )
+        raise stage_error
 
     if lease_lost.is_set():
         raise MediaStageLeaseError("Media production stage lease was lost during execution.")

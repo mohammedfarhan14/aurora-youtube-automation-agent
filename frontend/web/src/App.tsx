@@ -368,12 +368,20 @@ function App() {
     setAnalyticsData(null);
     setAnalyticsError("");
     setAnalyticsLoading(true);
+    // Ask through the last calendar day. YouTube Analytics can lag by 48–72h;
+    // keep those days visible as pending instead of silently shortening the
+    // report window to hide them.
     const end = new Date();
-    end.setUTCDate(end.getUTCDate() - 2);
+    end.setDate(end.getDate() - 1);
     const start = new Date(end);
-    start.setUTCDate(start.getUTCDate() - 27);
-    const endDate = end.toISOString().slice(0, 10);
-    const startDate = start.toISOString().slice(0, 10);
+    start.setDate(start.getDate() - 27);
+    const toCalendarDate = (date: Date) => [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-");
+    const endDate = toCalendarDate(end);
+    const startDate = toCalendarDate(start);
     try {
       const result = await apiRequest<YouTubeAnalytics>(
         `/organizations/${organizationId}/youtube-channels/${channel.id}/analytics?startDate=${startDate}&endDate=${endDate}`,
@@ -2126,7 +2134,7 @@ function App() {
                   <div className="section-heading">
                     <div>
                       <h2 id="analytics-title">{analyticsChannel.title} · Channel analytics</h2>
-                      <p className="muted">Verified YouTube Analytics for the most recent 28 complete days. Analytics may arrive with a reporting delay.</p>
+                      <p className="muted">Verified YouTube Analytics for the last 28 calendar days, ending yesterday. Recent days can take 48–72 hours to appear.</p>
                     </div>
                     <div className="analytics-actions">
                       <button className="button button-secondary button-small" onClick={() => void loadChannelAnalytics(analyticsChannel)} disabled={analyticsLoading}>{analyticsLoading ? "Refreshing…" : "Refresh"}</button>
@@ -2163,7 +2171,29 @@ function App() {
                   ) : analyticsData ? (
                     <p className="analytics-comparison-empty">Trend review is unavailable because YouTube did not return every day for two complete weeks. Missing report days are not counted as zero.</p>
                   ) : null}
-                  {analyticsData && analyticsData.rows.length > 0 && (() => {
+                  {analyticsData && (() => {
+                    const reportedByDay = new Map(analyticsData.rows.map((row) => [row.day, row]));
+                    const calendarRows: Array<{
+                      day: string;
+                      row: YouTubeAnalytics["rows"][number] | null;
+                      state: "reported" | "pending" | "unavailable";
+                    }> = [];
+                    const cursor = new Date(`${analyticsData.start_date}T00:00:00Z`);
+                    const finalDay = new Date(`${analyticsData.end_date}T00:00:00Z`);
+                    while (cursor <= finalDay) {
+                      const day = cursor.toISOString().slice(0, 10);
+                      const row = reportedByDay.get(day) ?? null;
+                      calendarRows.push({
+                        day,
+                        row,
+                        state: row
+                          ? "reported"
+                          : analyticsData.latest_report_day && day > analyticsData.latest_report_day
+                            ? "pending"
+                            : "unavailable",
+                      });
+                      cursor.setUTCDate(cursor.getUTCDate() + 1);
+                    }
                     const totals = analyticsData.rows.reduce((acc, row) => ({
                       views: acc.views + row.views,
                       watch: acc.watch + row.minutes_watched,
@@ -2174,16 +2204,23 @@ function App() {
                       shares: acc.shares + row.shares,
                     }), { views: 0, watch: 0, gained: 0, lost: 0, likes: 0, comments: 0, shares: 0 });
                     return <>
-                      <div className="analytics-summary">
-                        <div><span>Views</span><strong>{totals.views.toLocaleString()}</strong></div>
-                        <div><span>Watch time</span><strong>{totals.watch.toLocaleString(undefined, { maximumFractionDigits: 1 })} min</strong></div>
+                      {analyticsData.rows.length > 0 && <div className="analytics-summary">
+                        <div><span>Reported views</span><strong>{totals.views.toLocaleString()}</strong></div>
+                        <div><span>Reported watch time</span><strong>{totals.watch.toLocaleString(undefined, { maximumFractionDigits: 1 })} min</strong></div>
                         <div><span>Net subscribers</span><strong>{(totals.gained - totals.lost).toLocaleString()}</strong></div>
-                        <div><span>Engagements</span><strong>{(totals.likes + totals.comments + totals.shares).toLocaleString()}</strong></div>
-                      </div>
+                        <div><span>Reported engagements</span><strong>{(totals.likes + totals.comments + totals.shares).toLocaleString()}</strong></div>
+                      </div>}
                       <div className="analytics-table-wrap">
                         <table className="analytics-table">
                           <thead><tr><th scope="col">Day</th><th scope="col">Views</th><th scope="col">Watch minutes</th><th scope="col">Subscribers</th><th scope="col">Likes</th><th scope="col">Comments</th><th scope="col">Shares</th></tr></thead>
-                          <tbody>{analyticsData.rows.slice().reverse().map((row) => <tr key={row.day}><th scope="row">{row.day}</th><td>{row.views.toLocaleString()}</td><td>{row.minutes_watched.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td><td>+{row.subscribers_gained} / −{row.subscribers_lost}</td><td>{row.likes}</td><td>{row.comments}</td><td>{row.shares}</td></tr>)}</tbody>
+                          <tbody>{calendarRows.slice().reverse().map(({ day, row, state }) => <tr key={day}>
+                            <th scope="row">{day}</th>
+                            {row ? <>
+                              <td>{row.views.toLocaleString()}</td><td>{row.minutes_watched.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td><td>+{row.subscribers_gained} / −{row.subscribers_lost}</td><td>{row.likes}</td><td>{row.comments}</td><td>{row.shares}</td>
+                            </> : <td className={`analytics-no-data analytics-no-data-${state}`} colSpan={6}>
+                              {state === "pending" ? "Awaiting YouTube report · not counted as zero" : "No daily row returned · value unavailable"}
+                            </td>}
+                          </tr>)}</tbody>
                         </table>
                       </div>
                     </>;
