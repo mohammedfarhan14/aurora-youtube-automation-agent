@@ -126,7 +126,8 @@ def seed_channel_schedule(
                 granted_scopes=granted_scopes
                 or (
                     "https://www.googleapis.com/auth/youtube.readonly "
-                    "https://www.googleapis.com/auth/youtube.upload"
+                    "https://www.googleapis.com/auth/youtube.upload "
+                    "https://www.googleapis.com/auth/youtube.force-ssl"
                 ),
                 connected_by_user_id=UUID(user_id),
             )

@@ -295,7 +295,8 @@ def test_daily_mocked_pipeline_is_traceable_idempotent_and_scheduled(tmp_path, m
                 key_version=1,
                 granted_scopes=(
                     "https://www.googleapis.com/auth/youtube.readonly "
-                    "https://www.googleapis.com/auth/youtube.upload"
+                    "https://www.googleapis.com/auth/youtube.upload "
+                    "https://www.googleapis.com/auth/youtube.force-ssl"
                 ),
                 connected_by_user_id=user_uuid,
             )

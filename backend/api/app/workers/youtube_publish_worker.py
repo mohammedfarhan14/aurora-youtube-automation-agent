@@ -24,7 +24,7 @@ from app.services.youtube_crypto import (
     get_active_encryption_key,
     get_encryption_keys,
 )
-from app.services.youtube_oauth import channel_can_publish
+from app.services.youtube_oauth import YOUTUBE_VIDEO_WRITE_SCOPE, channel_can_publish
 from app.services.youtube_publish_validation import validate_youtube_publish_job_snapshot
 from app.services.youtube_publishing import (
     YouTubePublishLeaseLostError,
@@ -224,12 +224,14 @@ async def _refresh_channel_access_token(
                 set((channel.granted_scopes or "").split())
             ):
                 raise YouTubeReauthorizationRequired(
-                    "The connected channel is inactive or no longer has upload permission."
+                    "The connected channel is inactive or needs renewed YouTube publishing "
+                    "permissions for upload and visibility updates."
                 )
             token = await refresh_youtube_access_token(
                 settings,
                 channel,
                 client=upload_client.http_client,
+                required_scope=YOUTUBE_VIDEO_WRITE_SCOPE,
             )
         return token
 
@@ -582,7 +584,8 @@ async def process_claimed_youtube_publish_job(
         set(context.granted_scopes.split())
     ):
         raise YouTubeReauthorizationRequired(
-            "The connected channel is disconnected or no longer has upload permission."
+            "The connected channel is disconnected or needs renewed YouTube publishing "
+            "permissions for upload and visibility updates."
         )
     if not context.encrypted_refresh_token:
         raise YouTubeUploadPermanentError(

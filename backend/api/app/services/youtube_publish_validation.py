@@ -97,7 +97,8 @@ async def validate_youtube_publish_job_snapshot(
             set((channel.granted_scopes or "").split())
         ):
             raise YouTubeReauthorizationRequired(
-                "The connected channel is inactive or no longer has upload permission."
+                "The connected channel is inactive or needs renewed YouTube publishing "
+                "permissions for upload and visibility updates."
             )
         if job.approval_mode == "automatic_consent":
             from app.services.youtube_publishing import (

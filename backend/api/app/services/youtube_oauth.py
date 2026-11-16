@@ -26,9 +26,17 @@ from app.services.youtube_crypto import (
 YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_VIDEO_WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 YOUTUBE_CONNECT_SCOPES = (YOUTUBE_SCOPE, YOUTUBE_ANALYTICS_SCOPE)
-YOUTUBE_PUBLISH_SCOPES = (YOUTUBE_SCOPE, YOUTUBE_ANALYTICS_SCOPE, YOUTUBE_UPLOAD_SCOPE)
-YOUTUBE_PUBLISH_REQUIRED_SCOPES = frozenset((YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE))
+YOUTUBE_PUBLISH_SCOPES = (
+    YOUTUBE_SCOPE,
+    YOUTUBE_ANALYTICS_SCOPE,
+    YOUTUBE_UPLOAD_SCOPE,
+    YOUTUBE_VIDEO_WRITE_SCOPE,
+)
+YOUTUBE_PUBLISH_REQUIRED_SCOPES = frozenset(
+    (YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_VIDEO_WRITE_SCOPE)
+)
 _LEGACY_CONNECT_SCOPES = frozenset((YOUTUBE_SCOPE,))
 _LEGACY_PUBLISH_SCOPES = frozenset((YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE))
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"

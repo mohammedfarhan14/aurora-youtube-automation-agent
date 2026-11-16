@@ -47,6 +47,7 @@ from app.workers.youtube_publish_worker import process_claimed_youtube_publish_j
 client = TestClient(app)
 YOUTUBE_READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_VIDEO_WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 
 
 def create_user_and_organization() -> tuple[str, str, str]:
@@ -134,7 +135,7 @@ def seed_approved_video(
                 encrypted_refresh_token="test-encrypted-refresh-token",
                 key_version=1,
                 granted_scopes=(
-                    f"{YOUTUBE_READ_SCOPE} {YOUTUBE_UPLOAD_SCOPE}"
+                    f"{YOUTUBE_READ_SCOPE} {YOUTUBE_UPLOAD_SCOPE} {YOUTUBE_VIDEO_WRITE_SCOPE}"
                     if upload_scope
                     else YOUTUBE_READ_SCOPE
                 ),
@@ -493,6 +494,52 @@ def test_reconcile_existing_youtube_video_resumes_without_duplicate_upload():
                 }
 
         asyncio.run(assert_resume_snapshot())
+    finally:
+        cleanup_user(user_id)
+
+
+def test_reconcile_existing_video_requires_video_update_scope_before_requeue():
+    user_id, token, organization_id = create_user_and_organization()
+    run_id, channel_id, _ = seed_approved_video(user_id, organization_id)
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        created = client.post(
+            (
+                f"/api/v1/organizations/{organization_id}/production-runs/{run_id}"
+                "/youtube-publish-jobs"
+            ),
+            headers={**headers, "Idempotency-Key": "reconcile-needs-video-write"},
+            json={"title": "Already uploaded video", "privacy_status": "public"},
+        )
+        assert created.status_code == 201
+        job_id = UUID(created.json()["id"])
+
+        async def simulate_video_already_received_without_write_scope() -> None:
+            async with get_session_factory()() as session:
+                job = await session.get(YouTubePublishJob, job_id)
+                channel = await session.get(YouTubeChannel, UUID(channel_id))
+                assert job is not None and channel is not None
+                job.status = "reconciliation_required"
+                job.youtube_video_id = "already-created-video"
+                channel.granted_scopes = f"{YOUTUBE_READ_SCOPE} {YOUTUBE_UPLOAD_SCOPE}"
+                await session.commit()
+
+        asyncio.run(simulate_video_already_received_without_write_scope())
+        response = client.post(
+            f"/api/v1/organizations/{organization_id}/youtube-publish-jobs/{job_id}/reconcile",
+            headers=headers,
+        )
+        assert response.status_code == 409
+        assert "video-update permissions" in response.json()["detail"]
+
+        async def assert_job_stays_paused() -> None:
+            async with get_session_factory()() as session:
+                job = await session.get(YouTubePublishJob, job_id)
+                assert job is not None
+                assert job.status == "reconciliation_required"
+                assert job.youtube_video_id == "already-created-video"
+
+        asyncio.run(assert_job_stays_paused())
     finally:
         cleanup_user(user_id)
 

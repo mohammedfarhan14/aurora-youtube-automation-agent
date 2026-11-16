@@ -36,6 +36,8 @@ type AuthMode = "login" | "register" | "verify";
 type WorkspacePage = "overview" | "channels" | "research" | "studio" | "settings";
 type SettingsSection = "workspace" | "services" | "publishing" | "channel";
 const YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly";
+const YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
+const YOUTUBE_VIDEO_WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
 const kokoroVoiceChoices = [
   ["af_heart", "Heart · American English"],
   ["af_bella", "Bella · American English"],
@@ -806,11 +808,18 @@ function App() {
     () => productionRuns.find((run) => run.id === selectedProductionRunId) ?? null,
     [productionRuns, selectedProductionRunId],
   );
+  const selectedRunChannel = useMemo(
+    () => channels.find((channel) => channel.id === selectedProductionRun?.youtube_channel_id),
+    [channels, selectedProductionRun?.youtube_channel_id],
+  );
   const productionHardBlocker = useMemo(() => {
     if (!selectedProductionRun) return null;
-    const runChannel = channels.find((channel) => channel.id === selectedProductionRun.youtube_channel_id);
-    if (!runChannel?.can_publish) {
-      return "This run’s channel does not currently have YouTube upload permission. Reconnect it with the upload scope, then create a new run for that channel.";
+    if (!selectedRunChannel?.can_publish) {
+      const hasUploadScope = selectedRunChannel?.granted_scopes.includes(YOUTUBE_UPLOAD_SCOPE) ?? false;
+      const hasVideoWriteScope = selectedRunChannel?.granted_scopes.includes(YOUTUBE_VIDEO_WRITE_SCOPE) ?? false;
+      return hasUploadScope && !hasVideoWriteScope
+        ? "YouTube upload access is present, but this channel has not granted video-update permission. Reconnect publishing access before creating another upload job."
+        : "This channel needs YouTube upload and video-update permissions. Reconnect it with publishing access before creating another upload job.";
     }
     if (selectedProductionRun.youtube_channel_id !== productionChannelId) {
       return "This run is bound to a different channel. Create a new production for the selected demo channel before approval and upload.";
@@ -839,7 +848,7 @@ function App() {
       return "Technical video checks found problems. Fix and regenerate the video before upload.";
     }
     return null;
-  }, [channels, productionChannelId, selectedProductionRun]);
+  }, [productionChannelId, selectedProductionRun, selectedRunChannel]);
   const uploadReadyRunForSelectedChannel = useMemo(
     () => productionRuns.find(
       (run) => run.id !== selectedProductionRun?.id
@@ -1233,7 +1242,7 @@ function App() {
     if (!organizationId || !selectedProductionRun || !productionChannelId) return;
     const target = channels.find((channel) => channel.id === productionChannelId);
     if (!target?.can_publish) {
-      setProductionError("Choose a connected channel with YouTube upload access first.");
+      setProductionError("Choose a connected channel with full YouTube publishing access first.");
       return;
     }
     setProductionQueueBusy(true);
@@ -1370,7 +1379,7 @@ function App() {
       return;
     }
     if (!uploadChannel.can_publish) {
-      setProductionError(`“${uploadChannel.title}” does not have YouTube upload permission. Reconnect it with publishing access before approving this run.`);
+      setProductionError(`“${uploadChannel.title}” needs YouTube upload and video-update permissions. Reconnect it with publishing access before approving this run.`);
       return;
     }
     if (selectedProductionRun.youtube_channel_id !== productionChannelId) {
@@ -2080,7 +2089,11 @@ function App() {
                       <div className="channel-details"><strong>{channel.title}</strong><span>{channel.custom_url || channel.channel_id}</span><small>Connected {formatDate(channel.connected_at)}</small></div>
                       <span className="connected-pill"><span className="online-dot" /> Connected</span>
                       <span className={`scope-status-pill ${channel.can_publish ? "scope-status-enabled" : "scope-status-readonly"}`}>
-                        <LockIcon /> {channel.can_publish ? "Publishing enabled" : "Read-only"}
+                        <LockIcon /> {channel.can_publish
+                          ? "Publishing enabled"
+                          : channel.granted_scopes.includes(YOUTUBE_UPLOAD_SCOPE)
+                            ? "Video update permission missing"
+                            : "Read-only"}
                       </span>
                       <div className="channel-card-actions">
                       <button
@@ -2098,7 +2111,7 @@ function App() {
                       )}
                       {!channel.can_publish && (
                         <button className="button button-secondary button-small" onClick={() => void connectYouTube("publish", channel.id)} disabled={loading}>
-                          {loading ? "Opening consent…" : "Enable publishing"}
+                          {loading ? "Opening consent…" : channel.granted_scopes.includes(YOUTUBE_UPLOAD_SCOPE) ? "Reconnect for video updates" : "Enable publishing"}
                         </button>
                       )}
                       <button className="button button-secondary button-small" onClick={() => void openChannelSettings(channel)} disabled={channelSettingsLoading}>Profile & schedule</button>
@@ -3069,6 +3082,15 @@ function App() {
                                   <div className="research-detail-heading"><strong>{publishJob.title}</strong><span className={`research-status research-status-${publishJob.status}`}>{publishJob.status.replaceAll("_", " ")}</span></div>
                                   <p className="publish-destination">Destination: {channels.find((channel) => channel.id === selectedProductionRun.youtube_channel_id)?.title ?? "connected YouTube channel"} · Visibility: {publishJob.privacy_status}</p>
                                   {publishStatusError && <p className="publish-status-stale" role="status">{publishStatusError}</p>}
+                                  {publishJob.status === "reconciliation_required" && publishJob.youtube_video_id && (
+                                    <div className="publish-access-notice" role="status">
+                                      <strong>Video received by YouTube · visibility needs confirmation</strong>
+                                      <p>YouTube received the complete file and created a video ID. Aurora could not confirm the requested {publishJob.privacy_status} visibility, so this job is paused for recovery. Do not upload the video again.</p>
+                                      {selectedRunChannel?.granted_scopes.includes(YOUTUBE_UPLOAD_SCOPE) && !selectedRunChannel.granted_scopes.includes(YOUTUBE_VIDEO_WRITE_SCOPE) && (
+                                        <p>The current Google grant includes upload access, but is missing the video-update permission Aurora needs to finish publishing.</p>
+                                      )}
+                                    </div>
+                                  )}
                                   {(["queued", "initiating", "uploading", "processing", "uploaded"].includes(publishJob.status)) && (
                                     <div className="publish-progress" role="status" aria-live="polite">
                                       <strong>
@@ -3095,9 +3117,14 @@ function App() {
                                   {publishJob.published_at && <small>Uploaded {formatDate(publishJob.published_at)}</small>}
                                   {publishJob.status === "reconciliation_required" && publishJob.youtube_video_id && (
                                     <div className="publish-reconciliation-action">
-                                      <p className="muted">The video already exists on YouTube. Resume it here to verify processing and visibility without creating a duplicate upload. A custom thumbnail may be skipped if YouTube rejects that optional request.</p>
-                                      <button className="button button-primary" onClick={() => void reconcileYouTubeUpload()} disabled={publishActionBusy}>
-                                        {publishActionBusy ? "Resuming…" : "Resume existing YouTube video"}
+                                      <p className="muted">This recovery resumes the existing YouTube video; it does not send the video file again. After reconnecting, Aurora will check processing and apply the selected visibility.</p>
+                                      {!selectedRunChannel?.can_publish && selectedProductionRun.youtube_channel_id && (
+                                        <button className="button button-secondary" onClick={() => void connectYouTube("publish", selectedProductionRun.youtube_channel_id!)} disabled={loading}>
+                                          {loading ? "Opening Google consent…" : "Reconnect channel for publishing"}
+                                        </button>
+                                      )}
+                                      <button className="button button-primary" onClick={() => void reconcileYouTubeUpload()} disabled={publishActionBusy || !selectedRunChannel?.can_publish}>
+                                        {publishActionBusy ? "Resuming existing video…" : selectedRunChannel?.can_publish ? "Resume existing video (no re-upload)" : "Reconnect before resuming"}
                                       </button>
                                     </div>
                                   )}
@@ -3109,7 +3136,7 @@ function App() {
                                 </div>
                               ) : (
                                 <div className="story-review-section">
-                                  {productionHardBlocker && <div className="publish-access-notice"><strong>Upload access needs attention</strong><p>{productionHardBlocker}</p>{selectedProductionRun.youtube_channel_id && !channels.find((channel) => channel.id === selectedProductionRun.youtube_channel_id)?.can_publish && <button className="button button-secondary button-small" onClick={() => void connectYouTube("publish", selectedProductionRun.youtube_channel_id!)} disabled={loading}>{loading ? "Opening Google…" : "Reconnect with upload access"}</button>}</div>}
+                                  {productionHardBlocker && <div className="publish-access-notice"><strong>Publishing access needs attention</strong><p>{productionHardBlocker}</p>{selectedProductionRun.youtube_channel_id && !selectedRunChannel?.can_publish && <button className="button button-secondary button-small" onClick={() => void connectYouTube("publish", selectedProductionRun.youtube_channel_id!)} disabled={loading}>{loading ? "Opening Google…" : "Reconnect with publishing access"}</button>}</div>}
                                   <label>Video title<input value={publishTitle} maxLength={100} onChange={(event) => setPublishTitle(event.target.value)} /></label>
                                   <label>Description<textarea value={publishDescription} maxLength={5000} rows={5} onChange={(event) => setPublishDescription(event.target.value)} /></label>
                                   <label>Tags, separated by commas<input value={publishTags} onChange={(event) => setPublishTags(event.target.value)} placeholder="Optional" /></label>

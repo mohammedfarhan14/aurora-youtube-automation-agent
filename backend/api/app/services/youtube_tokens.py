@@ -20,6 +20,7 @@ from app.services.youtube_crypto import (
     get_active_encryption_key,
     get_encryption_keys,
 )
+from app.services.youtube_oauth import YOUTUBE_VIDEO_WRITE_SCOPE
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
@@ -73,7 +74,7 @@ async def refresh_youtube_access_token(
     channel: YouTubeChannel,
     *,
     client: httpx.AsyncClient,
-    required_scope: str = YOUTUBE_UPLOAD_SCOPE,
+    required_scope: str = YOUTUBE_VIDEO_WRITE_SCOPE,
 ) -> YouTubeAccessToken:
     """Exchange the channel's encrypted refresh token for a short-lived token.
 

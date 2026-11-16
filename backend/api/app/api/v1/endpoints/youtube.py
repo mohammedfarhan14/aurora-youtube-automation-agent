@@ -473,8 +473,8 @@ async def put_youtube_publishing_settings_endpoint(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "Grant YouTube upload permission for this exact channel "
-                    "before enabling automatic publishing."
+                    "Grant YouTube upload permission and video-update permission for this exact "
+                    "channel before enabling automatic publishing."
                 ),
             )
         if not was_enabled or policy_changed:
@@ -791,6 +791,21 @@ async def reconcile_youtube_publish_job_endpoint(
             detail=(
                 "Only a reconciliation-required job with an existing YouTube video "
                 "can be resumed."
+            ),
+        )
+    channel = await session.scalar(
+        select(YouTubeChannel).where(
+            YouTubeChannel.id == job.youtube_channel_id,
+            YouTubeChannel.organization_id == organization.id,
+            YouTubeChannel.status == "active",
+        )
+    )
+    if channel is None or not channel_can_publish(channel.granted_scopes or ""):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "YouTube already has this video. Reconnect the same channel with upload and "
+                "video-update permissions before resuming it; do not create another upload."
             ),
         )
 

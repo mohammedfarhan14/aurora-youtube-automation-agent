@@ -45,7 +45,8 @@ def _channel():
         organization_id=organization_id, channel_id=channel_id, status="active",
         granted_scopes=(
             "https://www.googleapis.com/auth/youtube.readonly "
-            "https://www.googleapis.com/auth/youtube.upload"
+            "https://www.googleapis.com/auth/youtube.upload "
+            "https://www.googleapis.com/auth/youtube.force-ssl"
         ),
         encrypted_refresh_token=encrypt_refresh_token(
             "refresh-secret", KEY, organization_id, channel_id, 1

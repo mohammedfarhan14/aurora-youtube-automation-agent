@@ -66,6 +66,22 @@ def test_youtube_resumable_client_refreshes_token_and_initiates_upload():
     assert metadata["status"]["containsSyntheticMedia"] is True
 
 
+def test_403_insufficient_permissions_explains_visibility_recovery():
+    from app.services.youtube_upload import _raise_for_status
+
+    response = httpx.Response(
+        403,
+        json={
+            "error": {
+                "errors": [{"reason": "insufficientPermissions"}],
+                "message": "insufficient permissions",
+            }
+        },
+    )
+    with pytest.raises(YouTubeUploadPermanentError, match="resume this existing video"):
+        _raise_for_status(response)
+
+
 def test_youtube_resumable_client_uploads_chunks_and_reconciles_ranges():
     calls = 0
 

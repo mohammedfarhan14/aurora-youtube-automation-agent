@@ -96,6 +96,30 @@ def _raise_for_status(response: httpx.Response, *, upload_session: bool = False)
         raise YouTubeUploadTransientError(
             f"YouTube API temporarily rejected the request ({response.status_code})."
         )
+    if response.status_code == 403:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        error = payload.get("error") if isinstance(payload, dict) else None
+        provider_errors = error.get("errors") if isinstance(error, dict) else None
+        reasons = {
+            item.get("reason")
+            for item in provider_errors or []
+            if isinstance(item, dict) and isinstance(item.get("reason"), str)
+        }
+        if "insufficientPermissions" in reasons:
+            raise YouTubeUploadPermanentError(
+                "YouTube accepted the video, but Google denied the visibility update because "
+                "the channel OAuth grant lacks video-update permission. Reconnect the channel "
+                "with publishing access, then resume this existing video; do not upload it again."
+            )
+        if "forbiddenPrivacySetting" in reasons:
+            raise YouTubeUploadPermanentError(
+                "YouTube accepted the video, but the channel does not allow the requested "
+                "visibility setting. Change the visibility in YouTube Studio or select another "
+                "visibility, then resume this existing video."
+            )
     raise YouTubeUploadPermanentError(
         f"YouTube API rejected the request ({response.status_code})."
     )

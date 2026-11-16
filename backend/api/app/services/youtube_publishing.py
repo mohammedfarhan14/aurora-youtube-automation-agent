@@ -246,7 +246,8 @@ async def create_youtube_publish_job(
         )
     if not channel_can_publish(set(channel.granted_scopes.split())):
         raise YouTubePublishingNotReadyError(
-            "The selected channel has not granted the YouTube upload permission."
+            "The selected channel must grant YouTube upload permission and video-update permission "
+            "so Aurora can upload the approved video and apply its selected visibility."
         )
 
     if run.approval_mode == "human":

@@ -11,7 +11,10 @@ from app.core.tokens import hash_token
 from app.services.youtube_oauth import (
     GOOGLE_AUTH_URL,
     YOUTUBE_ANALYTICS_SCOPE,
+    YOUTUBE_PUBLISH_SCOPES,
     YOUTUBE_SCOPE,
+    YOUTUBE_UPLOAD_SCOPE,
+    YOUTUBE_VIDEO_WRITE_SCOPE,
     YouTubeChannelNotFoundError,
     YouTubeOAuthError,
     _consume_state,
@@ -162,8 +165,6 @@ async def test_authorization_url_uses_readonly_scope_and_persists_scope_intent_a
 
 @pytest.mark.anyio
 async def test_authorization_url_requests_upload_scope_only_for_explicit_publish_consent():
-    from app.services.youtube_oauth import YOUTUBE_UPLOAD_SCOPE
-
     settings = Settings(
         _env_file=None,
         youtube_client_id="client-id",
@@ -193,28 +194,22 @@ async def test_authorization_url_requests_upload_scope_only_for_explicit_publish
     )
 
     query = parse_qs(urlparse(authorization_url).query)
-    assert set(query["scope"][0].split()) == {
-        YOUTUBE_SCOPE, YOUTUBE_ANALYTICS_SCOPE, YOUTUBE_UPLOAD_SCOPE
-    }
+    assert set(query["scope"][0].split()) == set(YOUTUBE_PUBLISH_SCOPES)
     attempt = session.add.call_args.args[0]
-    assert set(attempt.requested_scopes.split()) == {
-        YOUTUBE_SCOPE,
-        YOUTUBE_ANALYTICS_SCOPE,
-        YOUTUBE_UPLOAD_SCOPE,
-    }
+    assert set(attempt.requested_scopes.split()) == set(YOUTUBE_PUBLISH_SCOPES)
     assert attempt.target_channel_id == target_channel_id
     session.commit.assert_awaited_once()
 
 
-def test_publishing_capability_requires_both_read_and_upload_scopes():
-    from app.services.youtube_oauth import (
-        YOUTUBE_UPLOAD_SCOPE,
-        channel_can_publish,
-    )
+def test_publishing_capability_requires_read_upload_and_video_update_scopes():
+    from app.services.youtube_oauth import channel_can_publish
 
     assert not channel_can_publish(YOUTUBE_SCOPE)
     assert not channel_can_publish(YOUTUBE_UPLOAD_SCOPE)
-    assert channel_can_publish({YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE})
+    assert not channel_can_publish({YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE})
+    assert channel_can_publish(
+        {YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_VIDEO_WRITE_SCOPE}
+    )
 
 
 def test_granted_scope_validation_rejects_missing_upload_permission():
@@ -224,7 +219,10 @@ def test_granted_scope_validation_rejects_missing_upload_permission():
     )
 
     with pytest.raises(YouTubeOAuthError, match="did not grant all requested"):
-        validate_granted_scopes(YOUTUBE_SCOPE, (YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE))
+        validate_granted_scopes(
+            YOUTUBE_SCOPE,
+            (YOUTUBE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_VIDEO_WRITE_SCOPE),
+        )
 
 
 def test_granted_scope_validation_uses_requested_scopes_when_google_omits_scope():

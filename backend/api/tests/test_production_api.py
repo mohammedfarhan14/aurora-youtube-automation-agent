@@ -590,7 +590,8 @@ def test_daily_schedule_requires_publish_consent_and_persists_timezone():
                 assert channel is not None
                 channel.granted_scopes = (
                     "https://www.googleapis.com/auth/youtube.readonly "
-                    "https://www.googleapis.com/auth/youtube.upload"
+                    "https://www.googleapis.com/auth/youtube.upload "
+                    "https://www.googleapis.com/auth/youtube.force-ssl"
                 )
                 await session.commit()
 

@@ -27,12 +27,12 @@ from app.models.youtube import YouTubeChannel
 from app.models.youtube_channel_schedule import YouTubeChannelSchedule
 from app.models.youtube_publishing import YouTubePublishJob
 from app.schemas.production import (
+    ProductionCleanupResponse,
     ProductionReadinessCheck,
     ProductionReadinessResponse,
     ProductionRunApprovalRequest,
     ProductionRunCancelResponse,
     ProductionRunCreateRequest,
-    ProductionCleanupResponse,
     ProductionRunRejectRequest,
     ProductionRunResponse,
     StoryArtifactResponse,
@@ -50,6 +50,7 @@ from app.services.production import (
     reject_production_run,
     request_production_cancellation,
 )
+from app.services.youtube_oauth import YOUTUBE_UPLOAD_SCOPE, channel_can_publish
 from app.services.youtube_tokens import channel_can_read_analytics
 from app.story.contracts import StoryArtifact
 
@@ -369,24 +370,36 @@ async def production_readiness_endpoint(
             )
         )
     else:
-        upload_ready = any(
-            "https://www.googleapis.com/auth/youtube.upload" in channel.granted_scopes.split()
+        upload_scope_available = any(
+            YOUTUBE_UPLOAD_SCOPE in channel.granted_scopes.split()
             for channel in channels
+        )
+        upload_ready = any(
+            channel_can_publish(channel.granted_scopes) for channel in channels
         )
         checks.append(
             ProductionReadinessCheck(
                 key="channel",
                 status="ready" if upload_ready else "attention",
-                title="YouTube upload access",
+                title="YouTube publishing access",
                 detail=(
-                    f"{len(channels)} active channel(s) connected; upload scope is available."
+                    f"{len(channels)} active channel(s) connected; upload and visibility-update "
+                    "permissions are available."
                     if upload_ready
+                    else (
+                        "Upload permission is present, but Google video-update permission is "
+                        "needed to apply the selected visibility after processing."
+                    )
+                    if upload_scope_available
                     else f"{len(channels)} active channel(s) connected with read-only access."
                 ),
                 action=(
                     None
                     if upload_ready
-                    else "Grant upload access to the channel you will use in the demo."
+                    else (
+                        "Reconnect the channel with publishing access, including permission to "
+                        "update video visibility."
+                    )
                 ),
             )
         )
@@ -815,7 +828,9 @@ async def cleanup_production_runs_endpoint(
                 MediaArtifact.production_run_id == run.id,
             )
         )
-        media_keys.extend((artifact.storage_backend, artifact.storage_key) for artifact in artifacts)
+        media_keys.extend(
+            (artifact.storage_backend, artifact.storage_key) for artifact in artifacts
+        )
         await session.delete(run)
         deleted_count += 1
     await session.commit()
