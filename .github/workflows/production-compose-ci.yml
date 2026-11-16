@@ -1,0 +1,227 @@
+name: Production Compose CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - "docker-compose.prod.yml"
+      - "docker-compose.oci.yml"
+      - ".env.production.example"
+      - "backend/api/app/media/**"
+      - "backend/api/app/services/youtube_publish*"
+      - "backend/api/app/workers/media_stage_handlers.py"
+      - "backend/api/app/workers/run_media_production_worker.py"
+      - "backend/api/app/workers/youtube_publish_worker.py"
+      - "backend/api/app/core/config.py"
+      - "infrastructure/docker/media-egress/squid.conf"
+      - "infrastructure/docker/youtube-egress/squid.conf"
+      - "infrastructure/deployment/oci/**"
+      - "docs/operations/oracle-cloud-free-demo.md"
+      - "docs/operations/deployment-portability.md"
+      - "docs/deployment/coolify-setup.md"
+      - "frontend/web/**"
+      - "infrastructure/docker/frontend.*"
+      - ".github/workflows/production-compose-ci.yml"
+      - ".github/workflows/release-images.yml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "docker-compose.prod.yml"
+      - "docker-compose.oci.yml"
+      - ".env.production.example"
+      - "backend/api/app/media/**"
+      - "backend/api/app/services/youtube_publish*"
+      - "backend/api/app/workers/media_stage_handlers.py"
+      - "backend/api/app/workers/run_media_production_worker.py"
+      - "backend/api/app/workers/youtube_publish_worker.py"
+      - "backend/api/app/core/config.py"
+      - "infrastructure/docker/media-egress/squid.conf"
+      - "infrastructure/docker/youtube-egress/squid.conf"
+      - "infrastructure/deployment/oci/**"
+      - "docs/operations/oracle-cloud-free-demo.md"
+      - "docs/operations/deployment-portability.md"
+      - "docs/deployment/coolify-setup.md"
+      - "frontend/web/**"
+      - "infrastructure/docker/frontend.*"
+      - ".github/workflows/production-compose-ci.yml"
+      - ".github/workflows/release-images.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-compose-ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-image:
+    name: Build and smoke-test same-origin frontend image
+    runs-on: [self-hosted, linux, x64, aurora-ci]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Build frontend runtime image
+        run: docker build --file infrastructure/docker/frontend.Dockerfile --tag aurora-studio-frontend:ci .
+
+      - name: Check Nginx configuration
+        run: docker run --rm --add-host=api:127.0.0.1 --entrypoint nginx aurora-studio-frontend:ci -t
+
+      - name: Check SPA, security headers and OAuth log redaction
+        run: |
+          set -euo pipefail
+          docker run --detach --name aurora-frontend-ci --add-host=api:127.0.0.1 -p 127.0.0.1:8080:8080 aurora-studio-frontend:ci
+          trap 'docker logs aurora-frontend-ci; docker rm -f aurora-frontend-ci >/dev/null' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error -D /tmp/aurora-frontend-headers.txt http://127.0.0.1:8080/ -o /tmp/aurora-frontend.html
+          grep -qi '^content-security-policy:' /tmp/aurora-frontend-headers.txt
+          grep -q '<div id="root">' /tmp/aurora-frontend.html
+          curl --silent --output /dev/null 'http://127.0.0.1:8080/api/v1/integrations/youtube/callback?code=do-not-log&state=do-not-log'
+          sleep 1
+          if docker logs aurora-frontend-ci 2>&1 | grep -q 'do-not-log'; then
+            echo 'OAuth callback query appeared in frontend container logs.' >&2
+            exit 1
+          fi
+
+  validate:
+    name: Production Compose Validation
+    runs-on: [self-hosted, linux, x64, aurora-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate production Compose model and isolation
+        env:
+          AURORA_IMAGE_TAG: ci-placeholder
+          PUBLIC_DOMAIN: app.example.test
+          FRONTEND_URL: https://app.example.test
+          POSTGRES_DB: aurora_ci
+          POSTGRES_USER: aurora
+          POSTGRES_PASSWORD: ci-postgres-url-safe
+          REDIS_PASSWORD: ci-redis-url-safe
+          JWT_SECRET_KEY: ci-only-jwt-secret-not-for-production-0123456789abcdef
+          RATE_LIMIT_IDENTITY_SECRET: ci-only-rate-limit-secret-not-for-production-0123456789
+          INTEGRATION_TOKEN_ENCRYPTION_KEYRING: '{"1":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          EMAIL_OUTBOX_ENCRYPTION_KEYRING: '{"1":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+          METRICS_BEARER_TOKEN: ci-only-metrics-token-not-for-production-0123456789
+          YOUTUBE_CLIENT_ID: ci-youtube-client-id
+          YOUTUBE_CLIENT_SECRET: ci-only-youtube-secret
+          OPENAI_API_KEY: ci-only-openai-placeholder
+          STORY_WORKER_MODEL: ci-model
+          STORY_WORKER_VERIFICATION_MODEL: ci-verification-model
+          MEDIA_S3_ENDPOINT_URL: https://example.compat.objectstorage.us-ashburn-1.oraclecloud.com
+          MEDIA_S3_REGION: us-ashburn-1
+          MEDIA_S3_BUCKET: aurora-ci-media
+          MEDIA_S3_ACCESS_KEY_ID: ci-r2-access-key
+          MEDIA_S3_SECRET_ACCESS_KEY: ci-r2-secret-key
+          ELEVENLABS_API_KEY: ci-only-elevenlabs-placeholder
+          ELEVENLABS_MODEL_ID: ci-model
+          ELEVENLABS_VOICE_ID: ci-voice
+          MEDIA_TTS_LICENSE_ID: ci-license
+          MEDIA_TTS_LICENSE_URI: https://example.test/license
+          MEDIA_TTS_SOURCE_URI: https://example.test/source
+          MEDIA_TTS_ATTRIBUTION: CI-only attribution placeholder
+          MEDIA_WIKIMEDIA_USER_AGENT: "AuroraStudio/CI (contact: ci@example.test)"
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.prod.yml --profile youtube-publish config --format json > /tmp/aurora-production-compose.json
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/aurora-production-compose.json", encoding="utf-8") as handle:
+              config = json.load(handle)
+
+          services = config["services"]
+          assert {"postgres", "redis", "migrate", "api", "frontend", "email-worker", "research-worker", "research-egress-proxy", "story-worker", "media-worker", "youtube-egress-proxy", "media-egress-proxy", "youtube-publish-worker"} <= set(services)
+          assert "ports" not in services["postgres"]
+          assert "ports" not in services["redis"]
+          assert "8000" in services["api"]["expose"]
+          assert "8080" in services["frontend"]["expose"]
+          assert set(services["frontend"]["networks"]) == {"default"}
+          assert set(services["api"]["networks"]) == {"default", "app-internal"}
+          assert set(services["research-worker"]["networks"]) == {"research-data"}
+          assert set(services["research-egress-proxy"]["networks"]) == {"research-egress", "research-data"}
+          assert "ports" not in services["frontend"]
+          assert config["networks"]["app-internal"]["internal"] is True
+          assert config["networks"]["media-data"]["internal"] is True
+          assert config["networks"]["youtube-data"]["internal"] is True
+          assert config["networks"]["research-data"]["internal"] is True
+          assert config["networks"]["research-egress"].get("internal", False) is False
+          assert config["networks"]["media-egress"].get("internal", False) is False
+          assert config["networks"]["youtube-egress"].get("internal", False) is False
+
+          media = services["media-worker"]
+          media_limits = media["deploy"]["resources"]["limits"]
+          assert float(media_limits["cpus"]) == 2.0
+          memory = media_limits["memory"]
+          if isinstance(memory, str) and not memory.isdigit():
+              units = {"K": 1024, "M": 1024**2, "G": 1024**3}
+              suffix = memory[-1].upper()
+              assert suffix in units, f"Unsupported Compose memory limit: {memory}"
+              memory_bytes = int(memory[:-1]) * units[suffix]
+          else:
+              memory_bytes = int(memory)
+          assert memory_bytes <= 3 * 1024**3
+
+          api_env = services["api"]["environment"]
+          story_env = services["story-worker"]["environment"]
+          media_env = media["environment"]
+          email_env = services["email-worker"]["environment"]
+          assert api_env["YOUTUBE_PUBLISH_WORKER_ENABLED"] == "false"
+          assert services["research-worker"]["environment"]["RESEARCH_PROVIDER"] == "multi_source"
+          assert story_env["STORY_WORKER_ENABLED"] == "false"
+          assert media_env["MEDIA_WORKER_ENABLED"] == "false"
+          publisher = services["youtube-publish-worker"]
+          assert publisher["profiles"] == ["youtube-publish"]
+          assert set(publisher["networks"]) == {"app-internal", "media-data", "youtube-data"}
+          assert publisher["environment"]["YOUTUBE_PUBLISH_WORKER_ENABLED"] == "false"
+          assert publisher["environment"]["MEDIA_S3_PROXY_URL"] == "http://media-egress-proxy:3128"
+          assert publisher["read_only"] is True
+          assert publisher["deploy"]["resources"]["limits"]["pids"] == 128
+
+          assert "MEDIA_TTS_API_KEY" not in publisher["environment"]
+          assert services["youtube-egress-proxy"]["read_only"] is True
+          assert services["media-egress-proxy"]["read_only"] is True
+          assert set(services["youtube-egress-proxy"]["networks"]) == {"youtube-egress", "youtube-data"}
+          assert set(services["media-egress-proxy"]["networks"]) == {"media-egress", "media-data"}
+          assert media_env["MEDIA_VISUAL_PROVIDER"] == "wikimedia_commons"
+          assert "MEDIA_WIKIMEDIA_USER_AGENT" in media_env
+          assert "OPENAI_API_KEY" not in api_env and "STORY_WORKER_LLM_API_KEY" not in api_env
+          assert "STORY_WORKER_LLM_API_KEY" in story_env
+          assert "MEDIA_TTS_API_KEY" not in story_env
+          assert "MEDIA_TTS_API_KEY" in media_env
+          assert "MEDIA_S3_SECRET_ACCESS_KEY" in media_env
+          assert "STORY_WORKER_LLM_API_KEY" not in media_env
+          assert "MEDIA_S3_SECRET_ACCESS_KEY" not in email_env
+          assert "MEDIA_TTS_API_KEY" not in email_env
+          print("Production Compose validation passed: private data services, gated publisher, scoped egress, worker secret scoping, and FFmpeg resource limits.")
+          PY
+          docker compose \
+            -f docker-compose.prod.yml \
+            -f docker-compose.oci.yml \
+            --profile youtube-publish \
+            config --format json > /tmp/aurora-oci-compose.json
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/aurora-oci-compose.json", encoding="utf-8") as handle:
+              config = json.load(handle)
+          services = config["services"]
+          assert {"caddy", "api", "frontend", "postgres", "media-worker"} <= set(services)
+          assert "caddy" in services
+          assert set(port["published"] for port in services["caddy"]["ports"]) >= {"80", "443"}
+          assert services["caddy"]["environment"]["PUBLIC_DOMAIN"] == "app.example.test"
+          assert int(services["postgres"]["deploy"]["resources"]["limits"]["memory"]) == 1536 * 1024**2
+          assert int(services["media-worker"]["deploy"]["resources"]["limits"]["memory"]) == 2048 * 1024**2
+          assert services["media-worker"]["environment"]["MEDIA_S3_REGION"] == "us-ashburn-1"
+          PY

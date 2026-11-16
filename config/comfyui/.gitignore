@@ -1,0 +1,3 @@
+*.json
+!workflow_api.json
+!README.md

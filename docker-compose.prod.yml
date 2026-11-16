@@ -1,0 +1,408 @@
+name: aurora-studio
+# Production Docker Compose stack. The frontend is the sole web entry point and
+# proxies API requests on the same origin; Postgres and Redis remain private.
+x-common-environment: &common-environment
+  APP_NAME: Aurora Studio
+  APP_ENV: production
+  DEBUG: "false"
+  LOG_LEVEL: INFO
+  FRONTEND_URL: ${FRONTEND_URL:?Set public HTTPS frontend origin}
+  POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+  POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Set URL-safe REDIS_PASSWORD}@redis:6379/0
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
+  RATE_LIMIT_IDENTITY_SECRET: ${RATE_LIMIT_IDENTITY_SECRET:?Set RATE_LIMIT_IDENTITY_SECRET}
+  INTEGRATION_TOKEN_ENCRYPTION_KEYRING: ${INTEGRATION_TOKEN_ENCRYPTION_KEYRING:?Set integration keyring}
+  INTEGRATION_TOKEN_ACTIVE_KEY_VERSION: ${INTEGRATION_TOKEN_ACTIVE_KEY_VERSION:-1}
+  EMAIL_OUTBOX_ENCRYPTION_KEYRING: ${EMAIL_OUTBOX_ENCRYPTION_KEYRING:?Set email keyring}
+  EMAIL_OUTBOX_ACTIVE_KEY_VERSION: ${EMAIL_OUTBOX_ACTIVE_KEY_VERSION:-1}
+x-api-environment: &api-environment
+  <<: *common-environment
+  YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID:-}
+  YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET:-}
+  YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-${FRONTEND_URL}/api/v1/integrations/youtube/callback}
+  YOUTUBE_FRONTEND_RESULT_URL: ${YOUTUBE_FRONTEND_RESULT_URL:-${FRONTEND_URL}/settings/integrations}
+  YOUTUBE_PUBLISH_WORKER_ENABLED: ${YOUTUBE_PUBLISH_WORKER_ENABLED:-false}
+  YOUTUBE_EGRESS_PROXY_URL: http://youtube-egress-proxy:3128
+  METRICS_ENABLED: ${METRICS_ENABLED:-true}
+  METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:?Set METRICS_BEARER_TOKEN}
+x-email-environment: &email-environment
+  <<: *common-environment
+  INVITATION_EMAIL_MODE: ${INVITATION_EMAIL_MODE:-console}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+  EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+x-research-environment: &research-environment
+  <<: *common-environment
+  RESEARCH_PROVIDER: ${RESEARCH_PROVIDER:-multi_source}
+  TREND_DISCOVERY_PROVIDER: ${TREND_DISCOVERY_PROVIDER:-hacker_news}
+  RESEARCH_EGRESS_PROXY_URL: http://research-egress-proxy:3128
+x-story-environment: &story-environment
+  <<: *common-environment
+  STORY_WORKER_ENABLED: ${STORY_WORKER_ENABLED:-false}
+  STORY_WORKER_LLM_BASE_URL: https://api.openai.com/v1
+  STORY_WORKER_LLM_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+  STORY_WORKER_MODEL: ${STORY_WORKER_MODEL:?Set STORY_WORKER_MODEL}
+  STORY_WORKER_VERIFICATION_MODEL: ${STORY_WORKER_VERIFICATION_MODEL:?Set STORY_WORKER_VERIFICATION_MODEL}
+x-media-environment: &media-environment
+  <<: *common-environment
+  MEDIA_WORKER_ENABLED: ${MEDIA_WORKER_ENABLED:-false}
+  MEDIA_STORAGE_BACKEND: s3
+  MEDIA_S3_ENDPOINT_URL: ${MEDIA_S3_ENDPOINT_URL:?Set private S3-compatible storage endpoint}
+  MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set private media bucket}
+  MEDIA_S3_REGION: ${MEDIA_S3_REGION:-auto}
+  MEDIA_S3_ACCESS_KEY_ID: ${MEDIA_S3_ACCESS_KEY_ID:?Set S3-compatible access key}
+  MEDIA_S3_SECRET_ACCESS_KEY: ${MEDIA_S3_SECRET_ACCESS_KEY:?Set S3-compatible secret}
+  MEDIA_S3_PROXY_URL: http://media-egress-proxy:3128
+  MEDIA_TTS_PROVIDER: elevenlabs
+  MEDIA_TTS_BASE_URL: https://api.elevenlabs.io
+  MEDIA_TTS_API_KEY: ${ELEVENLABS_API_KEY:?Set ELEVENLABS_API_KEY}
+  MEDIA_TTS_MODEL: ${ELEVENLABS_MODEL_ID:?Set ElevenLabs model}
+  MEDIA_TTS_VOICE: ${ELEVENLABS_VOICE_ID:?Set licensed voice}
+  MEDIA_TTS_HOSTING_MODE: hosted
+  MEDIA_TTS_RIGHTS_BASIS: licensed
+  MEDIA_TTS_LICENSE_ID: ${MEDIA_TTS_LICENSE_ID:?Set reviewed license ID}
+  MEDIA_TTS_LICENSE_URI: ${MEDIA_TTS_LICENSE_URI:?Set reviewed HTTPS license URI}
+  MEDIA_TTS_SOURCE_URI: ${MEDIA_TTS_SOURCE_URI:?Set reviewed HTTPS source URI}
+  MEDIA_TTS_ATTRIBUTION: ${MEDIA_TTS_ATTRIBUTION:?Set required attribution}
+  MEDIA_TTS_MODEL_LICENSE_ID: ${MEDIA_TTS_MODEL_LICENSE_ID:-}
+  MEDIA_TTS_VOICE_LICENSE_ID: ${MEDIA_TTS_VOICE_LICENSE_ID:-}
+  MEDIA_TTS_SPEED: "1.0"
+  MEDIA_TTS_SAMPLE_RATES_HZ: "[24000]"
+  MEDIA_TTS_LANGUAGES: '["en-US"]'
+  MEDIA_TTS_TIMEOUT_SECONDS: "90"
+  MEDIA_TTS_PROXY_URL: http://media-egress-proxy:3128
+  MEDIA_TTS_MAX_RESPONSE_BYTES: "25000000"
+  MEDIA_VIDEO_ENCODER: libx264
+  MEDIA_AUDIO_ENCODER: aac
+  MEDIA_VIDEO_PRESET: veryfast
+  MEDIA_VIDEO_CRF: "23"
+  MEDIA_FFMPEG_PATH: ffmpeg
+  MEDIA_FFPROBE_PATH: ffprobe
+  MEDIA_VISUAL_PROVIDER: ${MEDIA_VISUAL_PROVIDER:-wikimedia_commons}
+  MEDIA_WIKIMEDIA_USER_AGENT: ${MEDIA_WIKIMEDIA_USER_AGENT:?Set Wikimedia contact user agent}
+  MEDIA_VISUAL_PROXY_URL: http://media-egress-proxy:3128
+x-publisher-environment: &publisher-environment
+  <<: *common-environment
+  MEDIA_STORAGE_BACKEND: s3
+  MEDIA_STORAGE_MAX_OBJECT_BYTES: "100000000"
+  MEDIA_S3_ENDPOINT_URL: ${MEDIA_S3_ENDPOINT_URL:?Set private S3-compatible storage endpoint}
+  MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set private media bucket}
+  MEDIA_S3_REGION: ${MEDIA_S3_REGION:-auto}
+  MEDIA_S3_ACCESS_KEY_ID: ${MEDIA_S3_ACCESS_KEY_ID:?Set S3-compatible access key}
+  MEDIA_S3_SECRET_ACCESS_KEY: ${MEDIA_S3_SECRET_ACCESS_KEY:?Set S3-compatible secret}
+  MEDIA_S3_PROXY_URL: http://media-egress-proxy:3128
+  YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID:-}
+  YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET:-}
+  YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-${FRONTEND_URL}/api/v1/integrations/youtube/callback}
+  YOUTUBE_PUBLISH_WORKER_ENABLED: ${YOUTUBE_PUBLISH_WORKER_ENABLED:-false}
+  YOUTUBE_EGRESS_PROXY_URL: http://youtube-egress-proxy:3128
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [app-internal, media-data, youtube-data, research-data]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 2G}
+        reservations: {memory: 512M}
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set URL-safe REDIS_PASSWORD}
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"
+    volumes: [redis_data:/data]
+    networks: [app-internal]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: {cpus: "0.50", memory: 512M}
+        reservations: {memory: 128M}
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  migrate:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-backend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: "no"
+    environment: *common-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [app-internal]
+    deploy:
+      resources:
+        limits: {cpus: "0.50", memory: 512M}
+
+  api:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-backend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: unless-stopped
+    init: true
+    environment: *api-environment
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    expose: ["8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    networks: [default, app-internal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: {cpus: "1.50", memory: 1536M}
+        reservations: {memory: 512M}
+    logging:
+      options: {max-size: "10m", max-file: "5"}
+
+  frontend:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-frontend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      api: {condition: service_healthy}
+    expose: ["8080"]
+    networks: [default]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits: {cpus: "0.50", memory: 256M}
+        reservations: {memory: 64M}
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  email-worker:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-backend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: unless-stopped
+    init: true
+    environment: *email-environment
+    command: ["python", "-m", "app.workers.run_email_outbox"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    networks: [default, app-internal]
+    stop_grace_period: 90s
+    deploy:
+      resources:
+        limits: {cpus: "0.50", memory: 512M}
+        reservations: {memory: 128M}
+
+  research-worker:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-backend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: unless-stopped
+    init: true
+    environment: *research-environment
+    command: ["python", "-m", "app.workers.run_research_worker"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      research-egress-proxy: {condition: service_healthy}
+    networks: [research-data]
+    stop_grace_period: 150s
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 1G, pids: 128}
+        reservations: {memory: 256M}
+
+  research-egress-proxy:
+    image: ubuntu/squid:6.6-24.04_beta
+    restart: unless-stopped
+    networks:
+      research-egress: {}
+      research-data:
+        aliases: [research-egress-proxy]
+    expose: ["3128"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3128'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs:
+      - /run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /var/cache/squid:rw,noexec,nosuid,size=32m
+      - /var/log/squid:rw,noexec,nosuid,size=32m
+      - /var/spool/squid:rw,noexec,nosuid,size=32m
+    volumes:
+      - ./infrastructure/docker/research-egress/squid.conf:/etc/squid/squid.conf:ro
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  story-worker:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-backend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: unless-stopped
+    init: true
+    environment: *story-environment
+    command: ["python", "-m", "app.workers.run_story_production_worker"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    networks: [default, app-internal]
+    stop_grace_period: 150s
+    deploy:
+      resources:
+        limits: {cpus: "1.50", memory: 1536M}
+        reservations: {memory: 384M}
+
+  media-worker:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-media-worker:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    restart: unless-stopped
+    init: true
+    environment: *media-environment
+    command: ["python", "-m", "app.workers.run_media_production_worker"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      media-egress-proxy: {condition: service_healthy}
+    networks: [app-internal, media-data]
+    stop_grace_period: 180s
+    deploy:
+      resources:
+        limits: {cpus: "2.00", memory: 3G}
+        reservations: {cpus: "0.50", memory: 768M}
+    logging:
+      options: {max-size: "20m", max-file: "3"}
+
+  youtube-egress-proxy:
+    image: ubuntu/squid:6.6-24.04_beta
+    restart: unless-stopped
+    networks:
+      youtube-egress: {}
+      youtube-data:
+        aliases: [youtube-egress-proxy]
+    expose: ["3128"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3128'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs:
+      - /run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /var/cache/squid:rw,noexec,nosuid,size=32m
+      - /var/log/squid:rw,noexec,nosuid,size=32m
+      - /var/spool/squid:rw,noexec,nosuid,size=32m
+    volumes:
+      - ./infrastructure/docker/youtube-egress/squid.conf:/etc/squid/squid.conf:ro
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  media-egress-proxy:
+    image: ubuntu/squid:6.6-24.04_beta
+    restart: unless-stopped
+    networks:
+      media-egress: {}
+      media-data:
+        aliases: [media-egress-proxy]
+    expose: ["3128"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3128'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs:
+      - /run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /var/cache/squid:rw,noexec,nosuid,size=32m
+      - /var/log/squid:rw,noexec,nosuid,size=32m
+      - /var/spool/squid:rw,noexec,nosuid,size=32m
+    volumes:
+      - ./infrastructure/docker/media-egress/squid.conf:/etc/squid/squid.conf:ro
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  youtube-publish-worker:
+    image: ghcr.io/mohammedfarhan14/aurora-youtube-automation-agent-backend:${AURORA_IMAGE_TAG:?Set immutable commit SHA}
+    profiles: [youtube-publish]
+    restart: on-failure
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    environment: *publisher-environment
+    command: ["python", "-m", "app.workers.youtube_publish_worker"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      youtube-egress-proxy: {condition: service_healthy}
+      media-egress-proxy: {condition: service_healthy}
+    networks: [app-internal, media-data, youtube-data]
+    stop_grace_period: 180s
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 1G, pids: 128}
+        reservations: {memory: 256M}
+    logging:
+      options: {max-size: "20m", max-file: "3"}
+
+networks:
+  app-internal:
+    internal: true
+  media-data:
+    internal: true
+  youtube-data:
+    internal: true
+  research-data:
+    internal: true
+  research-egress:
+  media-egress:
+  youtube-egress:
+
+volumes:
+  postgres_data:
+  redis_data:

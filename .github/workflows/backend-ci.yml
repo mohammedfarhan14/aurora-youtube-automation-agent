@@ -1,0 +1,444 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Backend Tests
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, linux, x64, aurora-ci]
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: aurora_studio_test
+          POSTGRES_USER: aurora
+          POSTGRES_PASSWORD: aurora-ci-password
+        options: >-
+          --health-cmd "pg_isready -U aurora -d aurora_studio_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+        ports:
+          - 5432/tcp
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379/tcp
+
+    env:
+      APP_ENV: development
+      JWT_SECRET_KEY: aurora-ci-only-secret-key-not-for-production-2026
+      FRONTEND_URL: http://localhost:5173
+      AUTH_LOGIN_IP_LIMIT: "1000"
+      AUTH_LOGIN_ACCOUNT_LIMIT: "1000"
+      AUTH_REGISTRATION_IP_LIMIT: "1000"
+      AUTH_VERIFICATION_RESEND_IP_LIMIT: "1000"
+      EMAIL_OUTBOX_ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      PYTHONUNBUFFERED: "1"
+      PIP_DEFAULT_TIMEOUT: "120"
+
+    defaults:
+      run:
+        working-directory: backend/api
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure dynamically allocated service endpoints
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+          REDIS_PORT: ${{ job.services.redis.ports[6379] }}
+        run: |
+          set -euo pipefail
+          test -n "$POSTGRES_PORT"
+          test -n "$REDIS_PORT"
+          echo "DATABASE_URL=postgresql+psycopg://aurora:aurora-ci-password@127.0.0.1:${POSTGRES_PORT}/aurora_studio_test" >> "$GITHUB_ENV"
+          echo "TEST_DATABASE_URL=postgresql+psycopg://aurora:aurora-ci-password@127.0.0.1:${POSTGRES_PORT}/aurora_studio_test" >> "$GITHUB_ENV"
+          echo "REDIS_URL=redis://127.0.0.1:${REDIS_PORT}/0" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          # Persistent self-hosted runners keep their local Python/pip caches.
+          # Avoid unnecessary remote cache restore/save operations.
+
+      - name: Verify FFmpeg integration-test runtime
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -hide_banner -encoders | grep -q libx264
+          ffprobe -version
+
+      - name: Install hash-locked backend dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip check
+
+      - name: Check code quality with Ruff
+        run: ruff check .
+
+      - name: Install hash-locked dependency security tools
+        run: |
+          python -m venv /tmp/aurora-security-tools
+          /tmp/aurora-security-tools/bin/python -m pip install \
+            --require-hashes \
+            -r requirements-security.lock
+          /tmp/aurora-security-tools/bin/python -m pip check
+
+      - name: Detect dependency manifest changes
+        id: dependency_changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+            pyproject.toml \
+            requirements.lock \
+            requirements-dev.lock \
+            requirements-security.in \
+            requirements-security.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Dependency inputs and lockfiles are unchanged; skipping lock regeneration."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dependency inputs or lockfiles changed; validating lockfiles."
+          fi
+
+      - name: Verify dependency lockfiles are up to date
+        if: steps.dependency_changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+
+          cp pyproject.toml requirements.lock requirements-dev.lock "$temp_dir/"
+          cp requirements-security.in requirements-security.lock "$temp_dir/"
+
+          (
+            cd "$temp_dir"
+            /tmp/aurora-security-tools/bin/pip-compile \
+              --quiet \
+              --no-upgrade \
+              --strip-extras \
+              --generate-hashes \
+              --index-url=https://pypi.org/simple \
+              --output-file=requirements.lock \
+              pyproject.toml
+
+            /tmp/aurora-security-tools/bin/pip-compile \
+              --quiet \
+              --no-upgrade \
+              --strip-extras \
+              --extra=dev \
+              --generate-hashes \
+              --index-url=https://pypi.org/simple \
+              --output-file=requirements-dev.lock \
+              pyproject.toml
+
+            /tmp/aurora-security-tools/bin/pip-compile \
+              --quiet \
+              --no-upgrade \
+              --strip-extras \
+              --allow-unsafe \
+              --generate-hashes \
+              --index-url=https://pypi.org/simple \
+              --output-file=requirements-security.lock \
+              requirements-security.in
+          )
+
+          echo "===== Runtime lockfile comparison ====="
+          diff -u requirements.lock "$temp_dir/requirements.lock"
+
+          echo "===== Development lockfile comparison ====="
+          diff -u requirements-dev.lock "$temp_dir/requirements-dev.lock"
+
+          echo "===== Security tools lockfile comparison ====="
+          diff -u requirements-security.lock "$temp_dir/requirements-security.lock"
+
+          echo "All three dependency lockfiles are synchronized."
+
+      - name: Audit runtime dependencies
+        run: |
+          /tmp/aurora-security-tools/bin/pip-audit \
+            --require-hashes \
+            -r requirements.lock
+
+      - name: Audit development dependencies
+        run: |
+          /tmp/aurora-security-tools/bin/pip-audit \
+            --require-hashes \
+            -r requirements-dev.lock
+
+      - name: Apply database migrations
+        run: alembic upgrade head
+
+      - name: Run backend tests
+        run: pytest -q
+
+  container:
+    name: Backend Container and Compose Validation
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action == 'ready_for_review' || (github.event.action == 'opened' && github.event.pull_request.draft == false) || (github.event.action == 'reopened' && github.event.pull_request.draft == false)))
+    runs-on: [self-hosted, linux, x64, aurora-ci]
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: aurora-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Remove orphaned Aurora CI networks
+        run: |
+          set -euo pipefail
+          # Only remove unused networks created by this repository's CI projects.
+          # Never prune unrelated Docker networks or networks with attached containers.
+          while IFS= read -r network; do
+            case "$network" in
+              aurora-ci-*) ;;
+              *) continue ;;
+            esac
+            attached="$(docker network inspect "$network" --format '{{len .Containers}}')"
+            if [[ "$attached" == "0" ]]; then
+              docker network rm "$network"
+            fi
+          done < <(docker network ls --format '{{.Name}}')
+          docker network ls
+          docker system df
+          
+      - name: Validate Docker Compose configuration
+        run: |
+          touch .env
+          POSTGRES_DB=aurora_ci POSTGRES_USER=aurora POSTGRES_PASSWORD=ci-placeholder docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app --profile media --profile youtube-publish config --format json > /tmp/aurora-compose.json
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/aurora-compose.json", encoding="utf-8") as compose_file:
+              config = json.load(compose_file)
+
+          services = config["services"]
+          networks = config["networks"]
+
+          assert networks["research-data"]["internal"] is True
+          assert networks["media-data"]["internal"] is True
+          assert networks["youtube-data"]["internal"] is True
+          assert set(services["research-worker"]["networks"]) == {"research-data"}
+          assert set(services["media-production-worker"]["networks"]) == {"media-data"}
+          assert set(services["youtube-publish-worker"]["networks"]) == {"youtube-data", "media-data"}
+          assert set(services["youtube-egress-proxy"]["networks"]) == {"default", "youtube-data"}
+          assert "default" not in services["research-worker"]["networks"]
+          assert "default" not in services["media-production-worker"]["networks"]
+          assert "default" not in services["youtube-publish-worker"]["networks"]
+          assert {"default", "research-data", "media-data", "youtube-data"} <= set(services["postgres"]["networks"])
+          assert not services["youtube-egress-proxy"].get("ports")
+          assert services["youtube-publish-worker"]["read_only"] is True
+          assert services["youtube-egress-proxy"]["read_only"] is True
+          assert {"default", "research-data"} <= set(services["redis"]["networks"])
+          for service, target in {"postgres": 5432, "redis": 6379, "api": 8000}.items():
+              bindings = services[service]["ports"]
+              assert len(bindings) == 1, (service, bindings)
+              binding = bindings[0]
+              assert binding["target"] == target, (service, binding)
+              assert binding.get("host_ip") == "127.0.0.1", (service, binding)
+              assert str(binding.get("published", "0")) in {"", "0"}, (service, binding)
+          print("Research/media/YouTube network isolation and dynamic host-port configuration verified.")
+          PY
+
+      - name: Run Docker Compose runtime smoke test
+        env:
+          POSTGRES_DB: aurora_ci
+          POSTGRES_USER: aurora
+          POSTGRES_PASSWORD: ci-placeholder
+          JWT_SECRET_KEY: aurora-ci-only-secret-key-not-for-production-2026
+          EMAIL_OUTBOX_ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: |
+          set -euo pipefail
+          cat > .env <<EOF
+          APP_ENV=development
+          DEBUG=false
+          POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          JWT_SECRET_KEY=${JWT_SECRET_KEY}
+          EMAIL_OUTBOX_ENCRYPTION_KEY=${EMAIL_OUTBOX_ENCRYPTION_KEY}
+          FRONTEND_URL=http://localhost:5173
+          MEDIA_INSTALL_CHROMIUM=false
+          EOF
+
+          cleanup() {
+            docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app --profile media --profile youtube-publish down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app build api email-worker research-worker
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile media build media-production-worker
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish build youtube-publish-worker
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile media run --rm --no-deps media-production-worker ffmpeg -hide_banner -version
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile media run --rm --no-deps media-production-worker ffprobe -version
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app run --rm --no-deps research-worker python -c 'import socket
+          s = socket.socket()
+          s.settimeout(2)
+          try:
+              s.connect(("1.1.1.1", 443))
+          except OSError:
+              print("Research worker public IPv4 egress is blocked.")
+          else:
+              raise SystemExit("Research worker unexpectedly reached public IPv4.")
+          finally:
+              s.close()'
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish up --detach youtube-egress-proxy
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish ps --all youtube-egress-proxy
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish logs youtube-egress-proxy
+          docker inspect "$(docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish ps -q youtube-egress-proxy)" --format '{{json .State.Health}}'
+          sleep 6
+          docker inspect "$(docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish ps -q youtube-egress-proxy)" --format '{{json .State}}'
+          docker logs --tail 100 "$(docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish ps -q youtube-egress-proxy)" || true
+          docker network inspect "$(docker network ls --filter name=youtube-data --format '{{.Name}}' | head -n1)"
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish run --rm --no-deps youtube-publish-worker python -c 'import asyncio, socket, httpx
+          print("RESOLVER CONFIG:", open("/etc/resolv.conf").read())
+          for host in ("postgres", "youtube-egress-proxy"):
+              try:
+                  print("DNS", host, socket.getaddrinfo(host, 3128))
+              except OSError as exc:
+                  print("DNS_ERROR", host, repr(exc))
+          s = socket.socket()
+          s.settimeout(2)
+          try:
+              s.connect(("1.1.1.1", 443))
+          except OSError:
+              print("YouTube worker direct public IPv4 egress is blocked.")
+          else:
+              raise SystemExit("YouTube worker unexpectedly reached public IPv4 directly.")
+          finally:
+              s.close()
+          async def check_proxy():
+              import time
+              proxy_ip = None
+              last_error = None
+              for _ in range(20):
+                  try:
+                      proxy_ip = socket.getaddrinfo("youtube-egress-proxy", 3128, type=socket.SOCK_STREAM)[0][4][0]
+                      break
+                  except OSError as exc:
+                      last_error = exc
+                      time.sleep(0.5)
+              if proxy_ip is None:
+                  raise SystemExit(f"YouTube egress proxy DNS lookup failed: {last_error!r}")
+              proxy_socket = None
+              for _ in range(30):
+                  try:
+                      proxy_socket = socket.create_connection((proxy_ip, 3128), timeout=3)
+                      break
+                  except OSError as exc:
+                      last_error = exc
+                      time.sleep(0.5)
+              if proxy_socket is None:
+                  raise SystemExit(f"YouTube egress proxy did not accept TCP connections: {last_error!r}")
+              with proxy_socket:
+                  crlf = bytes((13, 10))
+                  request = (
+                      b"GET http://example.com/ HTTP/1.1" + crlf
+                      + b"Host: example.com" + crlf
+                      + b"Connection: close" + crlf + crlf
+                  )
+                  proxy_socket.sendall(request)
+                  response = proxy_socket.recv(4096)
+              if not response.startswith(b"HTTP/1.1 403") and not response.startswith(b"HTTP/1.0 403"):
+                  raise SystemExit(f"The proxy did not deny the unapproved destination: {response[:200]!r}")
+              async with httpx.AsyncClient(proxy=f"http://{proxy_ip}:3128", trust_env=False, timeout=10) as client:
+                  try:
+                      response = await client.get("https://www.googleapis.com")
+                  except httpx.ProxyError as exc:
+                      raise SystemExit("The proxy denied the allowlisted Google API host.") from exc
+                  if response.status_code == 403 and "TCP_DENIED" in response.text:
+                      raise SystemExit("The proxy denied the allowlisted Google API host.")
+          asyncio.run(check_proxy())'
+          docker exec "$(docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile youtube-publish ps -q youtube-egress-proxy)" sh -c 'test -s /tmp/access.log'
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile media run --rm --no-deps media-production-worker python -c 'import socket
+          s = socket.socket()
+          s.settimeout(2)
+          try:
+              s.connect(("1.1.1.1", 443))
+          except OSError:
+              print("Media worker public IPv4 egress is blocked.")
+          else:
+              raise SystemExit("Media worker unexpectedly reached public IPv4.")
+          finally:
+              s.close()'
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile media run --rm --no-deps media-production-worker ffmpeg -hide_banner -encoders > /tmp/aurora-media-encoders.txt
+          grep -q libx264 /tmp/aurora-media-encoders.txt
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app run --rm api alembic upgrade head
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app up --detach --no-build
+
+          API_HOST_PORT="$(docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app port api 8000 | awk -F: '{print $NF}')"
+          test -n "$API_HOST_PORT"
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "http://127.0.0.1:${API_HOST_PORT}/health/ready" >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          heartbeat=0
+          for attempt in $(seq 1 30); do
+            if docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app logs email-worker 2>&1 | grep -q "Email outbox heartbeat"; then
+              heartbeat=1
+              break
+            fi
+            sleep 2
+          done
+          test "$heartbeat" -eq 1
+
+          research_heartbeat=0
+          for attempt in $(seq 1 30); do
+            if docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app logs research-worker 2>&1 | grep -q "Research worker heartbeat"; then
+              research_heartbeat=1
+              break
+            fi
+            sleep 2
+          done
+          test "$research_heartbeat" -eq 1
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.ci.yml --profile app logs email-worker research-worker

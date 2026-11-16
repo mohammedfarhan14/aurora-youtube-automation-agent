@@ -1,0 +1,58 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "frontend/web/**"
+      - ".github/workflows/frontend-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: [self-hosted, linux, x64, aurora-ci]
+    defaults:
+      run:
+        working-directory: frontend/web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 12.18.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          # Both persistent WSL runners share the local pnpm store under aurora_runner.
+          # Avoid downloading/restoring the same remote cache on every run.
+
+      - name: Configure persistent pnpm store
+        run: |
+          pnpm config set store-dir "$HOME/.cache/pnpm/store"
+          pnpm store path
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: pnpm test
+
+      - name: Build frontend
+        run: pnpm build

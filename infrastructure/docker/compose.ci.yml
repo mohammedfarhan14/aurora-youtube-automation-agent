@@ -1,0 +1,18 @@
+services:
+  postgres:
+    ports: !override
+      - target: 5432
+        host_ip: 127.0.0.1
+        protocol: tcp
+
+  redis:
+    ports: !override
+      - target: 6379
+        host_ip: 127.0.0.1
+        protocol: tcp
+
+  api:
+    ports: !override
+      - target: 8000
+        host_ip: 127.0.0.1
+        protocol: tcp

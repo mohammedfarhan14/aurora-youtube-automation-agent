@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aurora-studio:schema:music-metadata:1.0.0",
+  "title": "Aurora Studio Background Music Rights Metadata",
+  "description": "Rights and licensing provenance required before a background music track can be mixed into a commercial YouTube video.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "asset_id",
+    "title",
+    "creator",
+    "source_url",
+    "license_id",
+    "license_url",
+    "attribution_text",
+    "rights_status",
+    "usage_scope",
+    "commercial_use",
+    "derivative_works",
+    "content_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "asset_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "creator": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "source_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "license_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "license_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "attribution_text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "rights_status": { "enum": ["cleared", "review_required", "rejected"] },
+    "usage_scope": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["youtube", "commercial", "derivative_works", "social_media"] },
+      "allOf": [
+        { "contains": { "const": "youtube" } },
+        { "contains": { "const": "commercial" } }
+      ]
+    },
+    "commercial_use": { "const": true },
+    "derivative_works": { "const": true },
+    "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "expires_at": { "type": ["string", "null"], "format": "date-time" },
+    "notes": { "type": "string", "maxLength": 2000 }
+  }
+}

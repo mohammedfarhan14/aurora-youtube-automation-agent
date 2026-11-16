@@ -1,0 +1,103 @@
+# Important: Aurora Studio will contain API credentials, YouTube OAuth tokens,
+# environment files, generated videos, and potentially large AI model files.
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+token.json
+client_secret*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+pip-wheel-metadata/
+# Python package build artifacts
+*.egg-info/
+
+# Node.js
+node_modules/
+.pnpm-store/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Frontend tooling
+.vite/
+.next/
+.turbo/
+
+# IDEs and editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Operating systems
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+
+# Databases and local data
+*.sqlite
+*.sqlite3
+*.db
+data/local/
+backups/local/
+*-local-backup.sql
+
+# Media and generated assets
+media/generated/
+renders/
+output/
+generated/
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+
+# Generated AI model files and weights
+/models/
+/checkpoints/
+/model-weights/
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.ckpt
+# Docker local state
+.docker/
+.aurora-runtime/
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Local configuration
+.envrc
