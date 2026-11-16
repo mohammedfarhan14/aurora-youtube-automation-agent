@@ -255,6 +255,7 @@ function App() {
   const [productionError, setProductionError] = useState("");
   const [productionActionBusy, setProductionActionBusy] = useState(false);
   const [publishActionBusy, setPublishActionBusy] = useState(false);
+  const [publishStatusError, setPublishStatusError] = useState("");
   const publishRequestInFlight = useRef(false);
   const [publishJob, setPublishJob] = useState<{
     id: string;
@@ -779,6 +780,7 @@ function App() {
     const requestId = ++publishJobRequestId.current;
     if (!user || !organizationId || !selectedProductionRunId) {
       setPublishJob(null);
+      setPublishStatusError("");
       return;
     }
     try {
@@ -790,10 +792,13 @@ function App() {
       }>>(`/organizations/${organizationId}/youtube-publish-jobs?limit=100`);
       const job = jobs.find((item) => item.production_run_id === selectedProductionRunId);
       if (requestId === publishJobRequestId.current) {
+        setPublishStatusError("");
         setPublishJob(job ? { ...job, privacy_status: job.privacy_status } : null);
       }
     } catch {
-      if (requestId === publishJobRequestId.current) setPublishJob(null);
+      if (requestId === publishJobRequestId.current) {
+        setPublishStatusError("Upload status could not refresh. Showing the last confirmed status; Aurora will retry automatically.");
+      }
     }
   }, [organizationId, selectedProductionRunId, user]);
 
@@ -1430,6 +1435,7 @@ function App() {
     if (!user || !organizationId || !productionRunId || publishRequestInFlight.current) return false;
     publishRequestInFlight.current = true;
     setPublishActionBusy(true);
+    setPublishStatusError("");
     setProductionError("");
     clearMessages();
     setNotice(retry ? "Retry requested. Reconnecting to the YouTube publisher…" : "Starting YouTube upload. Aurora is creating a durable upload job…");
@@ -3062,6 +3068,7 @@ function App() {
                                 <div className="story-beat">
                                   <div className="research-detail-heading"><strong>{publishJob.title}</strong><span className={`research-status research-status-${publishJob.status}`}>{publishJob.status.replaceAll("_", " ")}</span></div>
                                   <p className="publish-destination">Destination: {channels.find((channel) => channel.id === selectedProductionRun.youtube_channel_id)?.title ?? "connected YouTube channel"} · Visibility: {publishJob.privacy_status}</p>
+                                  {publishStatusError && <p className="publish-status-stale" role="status">{publishStatusError}</p>}
                                   {(["queued", "initiating", "uploading", "processing", "uploaded"].includes(publishJob.status)) && (
                                     <div className="publish-progress" role="status" aria-live="polite">
                                       <strong>

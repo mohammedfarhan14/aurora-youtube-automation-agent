@@ -1605,6 +1605,19 @@ html[data-theme="dark"] .publish-warning {
   border-color: #6f572e;
 }
 .publish-destination { margin: 4px 0 8px; }
+.publish-status-stale {
+  margin: 5px 0 8px;
+  padding: 8px 10px;
+  color: #684d17 !important;
+  background: #fff8e8;
+  border: 1px solid #e5c785;
+  border-radius: 7px;
+}
+html[data-theme="dark"] .publish-status-stale {
+  color: #f3d8a8 !important;
+  background: #332919;
+  border-color: #6f572e;
+}
 .publish-progress {
   display: grid;
   gap: 5px;
